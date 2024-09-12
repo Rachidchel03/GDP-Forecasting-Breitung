@@ -1,0 +1,166 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import statistics as st
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.stattools import adfuller
+from scipy.stats import t
+import warnings
+warnings.filterwarnings('ignore')
+# Define optimal ARIMA orders for each country
+#optimal_orders_gdp = {
+#    'Canada': (5, 0, 1),
+#    'Euro Area': (3, 0, 1),
+#    'France': (1, 1, 2),
+#    'Germany': (1, 1, 4),
+#    'Italy': (1, 1, 2),
+#    'Japan': (2, 0, 1),
+#    'UK': (2, 0, 1),
+#    'US': (1, 0, 2)
+#}
+data = pd.read_excel(r"C:\Users\X360\Desktop\Thesis\New GDP.xlsx")
+data = data.dropna() 
+
+
+
+data.set_index('Country', inplace=True)
+
+optimal_orders_gdp = {
+    'Canada': ([1,2,5], 0, [2,3,5]),
+    'Euro Area': ([1,2,3], 0, [1,2,3]),
+    'France': ([1,2,3,4], 0, [1,2]),
+    'Germany': ([1,2,3,4], 0, [1,4,5]),
+    'Italy': ([1,3,4], 0, [5,7]),
+    'Japan': ([1,2,3], 0, [1,3]),
+    'UK': ([2], 0, [2,3,4]),
+    'US': ([1,3,4], 0, [1,2,4,5])
+}
+
+# Define countries
+countries = ['Canada', 'Euro Area', 'France', 'Germany', 'Italy', 'Japan', 'UK', 'US']
+
+beta=[0,0.5]
+lastarray=[]
+for betas in beta:
+   
+    
+    for country in countries:
+        largestar=optimal_orders_gdp[country][0]
+        largestma=optimal_orders_gdp[country][2]
+        degrees=max(max(largestar),max(largestma))
+        gdp_series = (data.loc[country].pct_change() * 100).dropna()
+        
+        train_size = int(len(gdp_series) * 0.7)
+        train = gdp_series[:train_size]
+        test = gdp_series[train_size:] 
+        test_size = len(test)
+        
+        order = optimal_orders_gdp[country]
+    
+        # Create lists to store results
+        t_test_results_total = []
+        
+        p_value_results = []
+        
+        steps_to_accept_null = []
+        mspe_results = []
+        mspe_std_results = []
+        mspe_mean_results = []
+        forecastsarray=[]
+        max_pvalue=[]
+        mspe_std = []
+        mspe_mean_results = {}
+        mspe=[]
+        std_results=[]
+        forecastsarraynew=[]
+        mspe_results_old=[]
+        newarray=[]
+        residuals_array=[]
+        #maxim=[]
+        
+        for T in range(test_size):
+            current_train = gdp_series[:train_size + T]
+            current_test = gdp_series[train_size + T:]
+            model = ARIMA(current_train, order=order)
+            model_fit = model.fit()
+            
+            #print(model_fit.summary())
+            max_horizon_for_T = []
+            parray=[]
+            t_test_results = []
+            
+            for H in range(1,len(current_test)):
+                forecasts = model_fit.get_forecast(steps=H)
+                forecast_df = forecasts.summary_frame()
+                forecast_mean = forecast_df['mean'].values
+                forecastsarray.append(forecast_mean)                
+                actual_values = current_test[:H].values
+                residuals = actual_values - np.mean(actual_values)
+
+                
+                mean_forecast = np.mean(forecast_mean)
+                alphat = (residuals - betas * (forecast_mean - mean_forecast)) * (forecast_mean - mean_forecast)
+                u=actual_values-forecast_mean
+                mspe=np.mean(u**2)
+                mspe_results_old.append(mspe)
+                variance=np.mean(u**2)
+                residuals_array.append(variance)
+                w = np.mean(u**2)
+                t_test = 1 / (np.sqrt(w) * np.sqrt(len(alphat))) * np.sum(alphat)
+                dof = degrees
+                p_value = 2 * (1 - t.cdf(abs(t_test), dof))
+                t_test_results.append(t_test)
+      
+                if p_value==1.0:
+                    p_value=0
+                
+                
+                parray.append(p_value)
+            p_value_results.append(parray)
+            t_test_results_total.append(t_test_results)
+            ratio=mspe_results_old[i]/residuals_array
+            mspe_std.append(ratio)
+            
+
+                    
+            mspe_results.append(np.mean(mspe_results_old)/mspe_results_old[i])
+
+        
+        newarray=[]
+        #print(residuals_array)
+        #print("mspe", mspe_results_old)
+        
+        mspe_std_results=mspe_std[10]
+        #print(mspe_std_results)
+        first_pvalue_array=p_value_results[10]
+        #print(first_pvalue_array) 
+        single_t_test=t_test_results_total[10]
+        
+        for i in range (1,len(single_t_test)):
+            if abs(single_t_test[i]) < 1.96:
+                max_forecast_horizon = i
+                
+                break
+                #max_pvalue.append(p_value)
+        max_horizon_for_T.append(max_forecast_horizon)
+        maximum=max_horizon_for_T
+        
+        std_residuals = np.std(model_fit.resid)
+        print(f'Max forecast horizon for {country} with beta={betas}: {maximum}')
+    
+        threshold = np.ones(9) * 0.05
+        x_index = range(1, 10)
+        plt.figure(figsize=(12, 6))
+        plt.plot(x_index, first_pvalue_array[1:10], label=f'P-value of {country} for beta= {betas}', marker='o' )
+        plt.plot(x_index, threshold, label='0.05 significance level', linestyle= '--')
+        plt.plot(range(1, 10),mspe_std_results[1:10], label=f'MSPE/Standard Error for {country}', marker='o')
+        plt.plot(range(1, 10), mspe_results[1:10], label=f'MSPE/Mean for {country}', marker='x')
+        plt.axhline(y=1, color='gray', linestyle='--')
+        plt.title(f'MSPE Ratios for {country}')
+        plt.xlabel('Forecast Horizon')
+        plt.ylabel('Ratio Value')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+        lastarray.append(p_value_results)
